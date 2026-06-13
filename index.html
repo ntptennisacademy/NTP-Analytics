@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>NTP Analytics</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0F5CCE">
+    <link rel="apple-touch-icon" href="/logo.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 20'%3E%3Ctext x='0' y='16' font-family='Arial Black, sans-serif' font-size='14' fill='%230F5CCE' font-style='italic' font-weight='900'%3ENTP ANALYTICS%3C/text%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0F5CCE',
+                        iosBg: '#F2F2F7',
+                        iosCard: '#FFFFFF',
+                        iosGray: '#8E8E93',
+                        iosDivider: '#C6C6C8'
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #F2F2F7;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            overflow-x: hidden;
+        }
+        /* Custom scrollbar for better iOS look */
+        ::-webkit-scrollbar {
+            width: 0px;
+        }
+        .scoreboard-font {
+            font-family: 'Helvetica Neue', sans-serif;
+            font-weight: 300;
+        }
+        /* Prevent iOS automatic zoom on focus by ensuring font-size is at least 16px */
+        input, select, textarea {
+            font-size: 16px !important;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+                let hasUnregistered = false;
+                for (let registration of registrations) {
+                    registration.unregister();
+                    hasUnregistered = true;
+                }
+                if (hasUnregistered) {
+                    console.log('Service worker found and unregistered.');
+                    if (!sessionStorage.getItem('sw_clean_reload_done')) {
+                        sessionStorage.setItem('sw_clean_reload_done', 'true');
+                        console.log('Performing clean refresh to fully release service worker control...');
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 300);
+                    }
+                }
+            }).catch(err => {
+                console.error('Error unregistering service worker:', err);
+            });
+        }
+        if ('caches' in window) {
+            caches.keys().then(names => {
+                for (let name of names) {
+                    caches.delete(name);
+                }
+            }).catch(err => {
+                console.error('Error clearing caches:', err);
+            });
+        }
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
