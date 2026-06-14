@@ -259,9 +259,18 @@ export function calculateStats(points: Point[], p1Id: string, p2Id: string) {
       breakPointsWon: createDetailed(breakPointsWonCount, myBPOpps.length),
       totalPointsWon: points.filter(p => p.winnerId === playerId).length,
       pointsWonPct: points.length > 0 ? (points.filter(p => p.winnerId === playerId).length / points.length) * 100 : 0,
-      touches04: points.filter(p => p.winnerId === playerId && p.rallyLength <= 4).length,
-      touches58: points.filter(p => p.winnerId === playerId && p.rallyLength > 4 && p.rallyLength <= 8).length,
-      touches9plus: points.filter(p => p.winnerId === playerId && p.rallyLength > 8).length
+      touches04: createDetailed(
+        points.filter(p => p.winnerId === playerId && p.rallyLength <= 4).length,
+        points.filter(p => p.rallyLength <= 4).length
+      ),
+      touches58: createDetailed(
+        points.filter(p => p.winnerId === playerId && p.rallyLength >= 5 && p.rallyLength <= 8).length,
+        points.filter(p => p.rallyLength >= 5 && p.rallyLength <= 8).length
+      ),
+      touches9plus: createDetailed(
+        points.filter(p => p.winnerId === playerId && p.rallyLength >= 9).length,
+        points.filter(p => p.rallyLength >= 9).length
+      )
     };
   };
 

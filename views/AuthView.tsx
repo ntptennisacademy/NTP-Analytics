@@ -162,7 +162,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess }) => {
       }
     } catch (err: any) {
       console.error('Authentication process failed:', err);
-      setErrorMsg(err.message || 'An unexpected error occurred. Please try again.');
+      const isFetchError = err?.message?.toLowerCase().includes('fetch') || err?.message?.toLowerCase().includes('network') || !navigator.onLine;
+      if (isFetchError) {
+        setErrorMsg('Network connectivity issue ("Failed to fetch"). The centralized database is currently unreachable. You can continue securely in Offline Sandbox Mode below.');
+      } else {
+        setErrorMsg(err.message || 'An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -371,6 +376,33 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess }) => {
             <div className="mt-6 text-center">
               <p className="text-xs text-[#8E8E93] font-medium">
                 Tip: Default account status for new registrations is <span className="font-bold text-[#1C1C1E]">pending approval</span> until authorized by an administrator.
+              </p>
+            </div>
+          )}
+
+          {(import.meta.env.DEV || 
+            window.location.hostname === 'localhost' || 
+            window.location.hostname === '127.0.0.1' || 
+            window.location.hostname.includes('ais-dev-') || 
+            window.location.hostname.includes('ais-pre-')) && (
+            <div className="mt-8 pt-6 border-t border-[#C6C6C8]/30 flex flex-col gap-3 font-sans">
+              <button
+                type="button"
+                onClick={() => {
+                  onAuthSuccess({
+                    id: 'guest_user',
+                    email: 'offline.user@ntpanalytics.local',
+                    full_name: 'Guest Player',
+                    is_guest: true
+                  });
+                }}
+                className="w-full py-3 bg-white border border-[#C6C6C8]/40 hover:border-[#0F5CCE] text-[#1C1C1E] font-bold rounded-2xl hover:bg-[#F2F2F7] active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 text-xs uppercase tracking-wider shadow-sm"
+              >
+                <i className="fa-solid fa-wifi-slash text-[#8E8E93]"></i>
+                <span>Use Offline Sandbox Mode</span>
+              </button>
+              <p className="text-[10px] text-center text-[#8E8E93] font-medium leading-relaxed">
+                Facing connection blockages or "Failed to fetch"? Sandbox mode enables full local statistics keeping saved securely in your browser's local storage.
               </p>
             </div>
           )}

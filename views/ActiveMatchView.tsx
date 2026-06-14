@@ -101,8 +101,40 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
   const [preServePlacement, setPreServePlacement] = React.useState<ServePlacement | null>(null);
   const [preServeType, setPreServeType] = React.useState<ServeType | null>(null);
   const [rallyLength, setRallyLength] = React.useState<number>(0);
+  const [showRallyCounter, setShowRallyCounter] = React.useState<boolean>(false);
 
-  const stats = calculateStats(points, p1.id, p2.id);
+  const [selectedSet, setSelectedSet] = React.useState<string>('Full Match');
+
+  const setOptions = React.useMemo(() => {
+    const playedSets = Array.from(
+      new Set(points.map(p => p.scoreAtStart.p1Sets + p.scoreAtStart.p2Sets + 1))
+    ).sort((a, b) => a - b);
+    
+    const options = [{ label: 'Full Match', value: 'Full Match' }];
+    if (playedSets.length === 0) {
+      options.push({ label: 'Set 1', value: 'Set 1' });
+    } else {
+      playedSets.forEach(s => {
+        options.push({ label: `Set ${s}`, value: `Set ${s}` });
+      });
+    }
+    return options;
+  }, [points]);
+
+  React.useEffect(() => {
+    if (!setOptions.some(opt => opt.value === selectedSet)) {
+      setSelectedSet('Full Match');
+    }
+  }, [setOptions, selectedSet]);
+
+  const filteredPoints = React.useMemo(() => {
+    if (selectedSet === 'Full Match') return points;
+    const setNumber = parseInt(selectedSet.replace('Set ', ''), 10);
+    if (isNaN(setNumber)) return points;
+    return points.filter(p => p.scoreAtStart.p1Sets + p.scoreAtStart.p2Sets + 1 === setNumber);
+  }, [points, selectedSet]);
+
+  const stats = calculateStats(filteredPoints, p1.id, p2.id);
 
   const showDoubleFault = score.servingPlayerId === pointModal.loserId && serveNumber === 2;
   const showAce = score.servingPlayerId === pointModal.winnerId;
@@ -493,12 +525,52 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
             <span className="text-sm font-bold text-iosGray mb-1 uppercase">{p1.name[0]}</span>
             <span className="text-8xl scoreboard-font text-primary tracking-tighter tabular-nums">{score.p1Points}</span>
           </div>
+
           <div className="flex flex-col items-center flex-1 cursor-pointer" onClick={() => handlePointClick(p2.id, p1.id)}>
             {!score.isMatchOver && score.servingPlayerId === p2.id && <div className="w-2.5 h-2.5 bg-yellow-400 rounded-full absolute right-4 top-2 animate-pulse"></div>}
             <span className="text-sm font-bold text-iosGray mb-1 uppercase">{p2.name[0]}</span>
             <span className="text-8xl scoreboard-font text-black tracking-tighter tabular-nums">{score.p2Points}</span>
           </div>
         </div>
+
+        {!isReadOnly && !score.isMatchOver && (
+          <div className="flex justify-center mb-4 -mt-2">
+            <button
+              type="button"
+              onClick={() => setShowRallyCounter(!showRallyCounter)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-black uppercase tracking-widest transition-all duration-300 shadow-sm active:scale-95 ${
+                showRallyCounter 
+                  ? 'bg-primary text-white border-primary shadow-md' 
+                  : 'bg-white text-primary border-primary/20 hover:bg-neutral-50 hover:border-primary/40'
+              }`}
+            >
+              <i className="fa-solid fa-baseball text-[9px]"></i>
+              <span>Rally Clicker</span>
+            </button>
+          </div>
+        )}
+
+        {!isReadOnly && !score.isMatchOver && showRallyCounter && (
+          <div className="px-4 mb-5 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="bg-[#F2F2F7] border border-[#C6C6C8]/30 rounded-2xl p-2.5 shadow-sm">
+              <div 
+                className="bg-white hover:bg-[#EAEAEF] active:scale-[0.99] border border-[#C6C6C8]/40 rounded-xl p-4 flex items-center justify-between cursor-pointer transition-all select-none shadow-sm"
+                onClick={() => setRallyLength(prev => prev + 1)}
+              >
+                <div className="flex flex-col items-start gap-0.5">
+                  <span className="text-[11px] uppercase font-black text-primary/80 tracking-widest leading-none">Tap to Add Hit</span>
+                  <span className="text-[9px] text-iosGray font-medium leading-none mt-1">Tap this entire area during a rally</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-4xl font-black tracking-tight text-primary tabular-nums leading-none">{rallyLength}</span>
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <i className="fa-solid fa-baseball text-sm"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {!isReadOnly && !score.isMatchOver && (
           <div className="px-4 mb-6 space-y-4">
@@ -544,6 +616,15 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
           </div>
         )}
 
+        {/* Set Selector Filter */}
+        <div className="px-4 mb-5">
+          <SegmentedControl 
+            options={setOptions} 
+            value={selectedSet} 
+            onChange={(v: string) => setSelectedSet(v)} 
+          />
+        </div>
+
         <div className="px-4">
           {activeSubTab === 'Match Stats' && (
             <Card className="divide-y divide-iosDivider/10 border-none shadow-none bg-transparent">
@@ -559,6 +640,9 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
               <StatRow label="break points saved" val1={stats.p1.breakPointsSaved} val2={stats.p2.breakPointsSaved} />
               <StatRow label="total points won" val1={stats.p1.totalPointsWon} val2={stats.p2.totalPointsWon} />
               <StatRow label="% of points won" val1={stats.p1.pointsWonPct} val2={stats.p2.pointsWonPct} isPercentOnly />
+              <StatRow label="0-4 touches (short rallies)" val1={stats.p1.touches04} val2={stats.p2.touches04} />
+              <StatRow label="5-8 touches (medium rallies)" val1={stats.p1.touches58} val2={stats.p2.touches58} />
+              <StatRow label="9+ touches (long rallies)" val1={stats.p1.touches9plus} val2={stats.p2.touches9plus} />
             </Card>
           )}
 
@@ -570,9 +654,9 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
                   <span className="text-[10px] font-black uppercase text-iosGray tracking-[0.2em]">Match Overview</span>
                   <span className="h-[1px] flex-1 bg-iosDivider/20"></span>
                 </div>
-                <ShotSection title="Winners" rows={calculateShotBreakdown(points, p1.id, p2.id, 'Winner')} />
-                <ShotSection title="Forced Errors" rows={calculateShotBreakdown(points, p1.id, p2.id, 'Forced Error')} />
-                <ShotSection title="Unforced Errors" rows={calculateShotBreakdown(points, p1.id, p2.id, 'Unforced Error')} />
+                <ShotSection title="Winners" rows={calculateShotBreakdown(filteredPoints, p1.id, p2.id, 'Winner')} />
+                <ShotSection title="Forced Errors" rows={calculateShotBreakdown(filteredPoints, p1.id, p2.id, 'Forced Error')} />
+                <ShotSection title="Unforced Errors" rows={calculateShotBreakdown(filteredPoints, p1.id, p2.id, 'Unforced Error')} />
               </div>
 
               {/* Player 1 Analysis */}
@@ -581,8 +665,8 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[12px] font-black uppercase shadow-sm border-2 border-white">{p1.name[0]}</div>
                   <h4 className="text-[14px] uppercase font-black text-black tracking-widest">{p1.name}'s Deep Analysis</h4>
                 </div>
-                <PlacementEfficiency stats={calculateDetailedShotStats(points, p1.id).placementStats} />
-                <ErrorAnatomy stats={calculateDetailedShotStats(points, p1.id).errorStats} />
+                <PlacementEfficiency stats={calculateDetailedShotStats(filteredPoints, p1.id).placementStats} />
+                <ErrorAnatomy stats={calculateDetailedShotStats(filteredPoints, p1.id).errorStats} />
               </div>
 
               {/* Player 2 Analysis */}
@@ -591,8 +675,8 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-[12px] font-black uppercase shadow-sm border-2 border-white">{p2.name[0]}</div>
                   <h4 className="text-[14px] uppercase font-black text-black tracking-widest">{p2.name}'s Deep Analysis</h4>
                 </div>
-                <PlacementEfficiency stats={calculateDetailedShotStats(points, p2.id).placementStats} />
-                <ErrorAnatomy stats={calculateDetailedShotStats(points, p2.id).errorStats} />
+                <PlacementEfficiency stats={calculateDetailedShotStats(filteredPoints, p2.id).placementStats} />
+                <ErrorAnatomy stats={calculateDetailedShotStats(filteredPoints, p2.id).errorStats} />
               </div>
             </div>
           )}
@@ -600,19 +684,19 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
           {activeSubTab === 'Serve Analysis' && (
             <div className="space-y-12 pb-10">
               <div className="space-y-8">
-                <ServePlacementGrid player={p1} stats={calculateServePlacementStats(points, p1.id)} />
-                <ServeTypeGrid player={p1} stats={calculateServeTypeStats(points, p1.id)} />
+                <ServePlacementGrid player={p1} stats={calculateServePlacementStats(filteredPoints, p1.id)} />
+                <ServeTypeGrid player={p1} stats={calculateServeTypeStats(filteredPoints, p1.id)} />
               </div>
               <div className="space-y-8">
-                <ServePlacementGrid player={p2} stats={calculateServePlacementStats(points, p2.id)} />
-                <ServeTypeGrid player={p2} stats={calculateServeTypeStats(points, p2.id)} />
+                <ServePlacementGrid player={p2} stats={calculateServePlacementStats(filteredPoints, p2.id)} />
+                <ServeTypeGrid player={p2} stats={calculateServeTypeStats(filteredPoints, p2.id)} />
               </div>
             </div>
           )}
 
           {activeSubTab === 'Match Log' && (
             <div className="bg-white rounded-xl overflow-hidden border border-iosDivider/20 mb-10 shadow-sm">
-              {points.slice().reverse().map((p, i) => (
+              {filteredPoints.slice().reverse().map((p, i) => (
                 <div key={i} className="flex justify-between items-center px-4 py-5 border-b border-iosDivider/10 bg-white">
                   <div className="w-12 text-primary font-black text-[13px]">{p.scoreAtStart.p1Points}</div>
                   <div className="flex-1 px-4 text-center text-[12px] font-medium text-black/80">{getPointDescription(p, players)}</div>
