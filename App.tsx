@@ -1,7 +1,7 @@
 import React from 'react';
 import Layout from './components/Layout';
 import { Tab, Player, Match, MatchConfig, Point } from './types';
-import { loadPlayers, loadMatches, savePlayers, saveMatches } from './store';
+import { readLegacyData } from './store';
 import MatchesView from './views/MatchesView';
 import PlayersView from './views/PlayersView';
 import SetupView from './views/SetupView';
@@ -10,11 +10,16 @@ import AddPlayerView from './views/AddPlayerView';
 import { getFinalScoreString, getScoreDetails } from './logic/tennisLogic';
 import { supabase } from './supabaseClient';
 import { AuthView } from './views/AuthView';
+import { loadWorkspace, upsertPlayer, removePlayer, upsertMatch, removeMatch } from './repository';
+import type { User } from '@supabase/supabase-js';
+import { ImportPanel } from './components/ImportPanel';
+import { consumeSsoHandoff, hasSsoHandoff } from './ssoHandoff';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<Tab>(Tab.Matches);
   const [players, setPlayers] = React.useState<Player[]>([]);
   const [matches, setMatches] = React.useState<Match[]>([]);
+  const matchesRef = React.useRef<Match[]>([]);
   const [isSettingUp, setIsSettingUp] = React.useState(false);
   const [isAddingPlayer, setIsAddingPlayer] = React.useState(false);
   const [editingPlayer, setEditingPlayer] = React.useState<Player | null>(null);
@@ -23,81 +28,129 @@ const App: React.FC = () => {
   const [viewingMatch, setViewingMatch] = React.useState<Match | null>(null);
   const [editingSettingsMatch, setEditingSettingsMatch] = React.useState<Match | null>(null);
 
-  const [sessionUser, setSessionUser] = React.useState<any>(null);
-  const [isAuthChecking, setIsAuthChecking] = React.useState(true);
-
-  const checkApproval = async (userId: string) => {
-    try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('is_approved')
-        .eq('id', userId)
-        .maybeSingle();
-      return !!profile?.is_approved;
-    } catch (err) {
-      console.error("Failed to check approval:", err);
-      return false;
-    }
-  };
+  const [sessionUser, setSessionUser] = React.useState<User | null>(null);
+  const [access, setAccess] = React.useState<'checking' | 'signedOut' | 'ready' | 'error'>('checking');
+  const [accessError, setAccessError] = React.useState('');
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  // Coaches arriving from the NTP Superapp's Analytics tile carry a hand-off
+  // code we redeem before deciding whether anyone is signed in.
+  const [ssoBusy, setSsoBusy] = React.useState(hasSsoHandoff);
+  const [handoffError, setHandoffError] = React.useState('');
+  const [syncError, setSyncError] = React.useState('');
+  const [pendingWrites, setPendingWrites] = React.useState(0);
+  const [importing, setImporting] = React.useState(false);
+  const [localBackup, setLocalBackup] = React.useState<{ players: Player[]; matches: Match[] } | null>(null);
+  const operations = React.useRef<Array<{ key: string; run: () => Promise<void> }>>([]);
+  const flushing = React.useRef(false);
 
   React.useEffect(() => {
-    const checkInitialSession = async () => {
+    if (!supabase) return;
+    let active = true;
+    const db = supabase;
+    const check = async () => {
+      setAccess('checking');
       try {
-        const response = await supabase.auth.getSession();
-        const session = response?.data?.session;
-        if (session?.user) {
-          const approved = await checkApproval(session.user.id);
-          if (approved) {
-            setSessionUser(session.user);
-            setPlayers(loadPlayers());
-            setMatches(loadMatches());
-          } else {
-            try {
-              await supabase.auth.signOut();
-            } catch (signOutErr) {
-              console.error("Sign out on pending check failed:", signOutErr);
-            }
-            setSessionUser(null);
-          }
+        try {
+          await consumeSsoHandoff(db);
+        } catch (error) {
+          // Fall through to the normal sign-in form rather than dead-ending.
+          if (active) setHandoffError(error instanceof Error ? error.message
+            : 'Could not sign you in from the NTP Superapp.');
+        } finally {
+          if (active) setSsoBusy(false);
         }
-      } catch (err) {
-        console.error("Auth check failed:", err);
-      } finally {
-        setIsAuthChecking(false);
+        const { data: sessionData, error: sessionError } = await db.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!sessionData.session) {
+          if (active) {
+            setSessionUser(null);
+            setPlayers([]);
+            matchesRef.current = [];
+            setMatches([]);
+            setAccess('signedOut');
+          }
+          return;
+        }
+        const { data: userData, error: userError } = await db.auth.getUser();
+        if (userError) throw userError;
+        const user = userData.user;
+        if (!user) throw new Error('Could not verify your account.');
+        const workspace = await loadWorkspace(user.id);
+        if (!active) return;
+        setSessionUser(user);
+        setPlayers(workspace.players);
+        matchesRef.current = workspace.matches;
+        setMatches(workspace.matches);
+        const legacy = readLegacyData();
+        const playerIds = new Set(workspace.players.map(player => player.id));
+        const matchIds = new Set(workspace.matches.map(match => match.id));
+        setLocalBackup(legacy && (legacy.players.some(player => !playerIds.has(player.id)) ||
+          legacy.matches.some(match => !matchIds.has(match.id))) ? legacy : null);
+        setAccess('ready');
+      } catch (error) {
+        if (active) {
+          setAccessError(error instanceof Error ? error.message : 'Could not connect to Supabase.');
+          setAccess('error');
+        }
       }
     };
-
-    checkInitialSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      try {
-        if (session?.user) {
-          const approved = await checkApproval(session.user.id);
-          if (approved) {
-            setSessionUser(session.user);
-            setPlayers(loadPlayers());
-            setMatches(loadMatches());
-          } else {
-            setSessionUser(null);
-          }
-        } else {
-          setSessionUser(null);
-        }
-      } catch (err) {
-        console.error("Auth state change error handled:", err);
-        setSessionUser(null);
+    void check();
+    const { data: { subscription } } = db.auth.onAuthStateChange(event => {
+      if (event === 'SIGNED_OUT') {
+        // Keep Supabase calls outside the auth callback.
+        window.setTimeout(() => setRefreshKey(value => value + 1), 0);
       }
     });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, [refreshKey]);
 
-    return () => {
-      subscription.unsubscribe();
+  React.useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (operations.current.length) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
     };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
   }, []);
+
+  const flushWrites = async () => {
+    if (flushing.current) return;
+    flushing.current = true;
+    while (operations.current.length) {
+      try {
+        await operations.current[0].run();
+        operations.current.shift();
+        setPendingWrites(operations.current.length);
+        setSyncError('');
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : 'Could not save changes.');
+        break;
+      }
+    }
+    flushing.current = false;
+  };
+
+  const queueWrite = (key: string, operation: () => Promise<void>) => {
+    // Keep the newest snapshot when a match changes rapidly (for example, notes).
+    const replaceAt = operations.current.findIndex((item, index) =>
+      index >= (flushing.current ? 1 : 0) && item.key === key);
+    if (replaceAt >= 0) operations.current[replaceAt] = { key, run: operation };
+    else operations.current.push({ key, run: operation });
+    setPendingWrites(operations.current.length);
+    void flushWrites();
+  };
+
+  const replaceMatches = (next: Match[]) => {
+    matchesRef.current = next;
+    setMatches(next);
+  };
 
   const handleStartMatch = (config: MatchConfig) => {
     if (config.existingMatchId) {
       // Handle saving edited settings for an existing match
-      const updatedMatches = matches.map(m => {
+      const updatedMatches = matchesRef.current.map(m => {
         if (m.id === config.existingMatchId) {
            const finalScore = getFinalScoreString(m.points, config);
            const details = getScoreDetails(m.points, config);
@@ -105,10 +158,9 @@ const App: React.FC = () => {
         }
         return m;
       });
-      setMatches(updatedMatches);
-      saveMatches(updatedMatches);
-      
+      replaceMatches(updatedMatches);
       const updatedMatch = updatedMatches.find(m => m.id === config.existingMatchId);
+      if (updatedMatch && sessionUser) queueWrite(`match:${updatedMatch.id}`, () => upsertMatch(sessionUser.id, updatedMatch));
       
       // If we were editing from viewing, update viewing state
       if (viewingMatch && viewingMatch.id === config.existingMatchId) {
@@ -125,7 +177,7 @@ const App: React.FC = () => {
       return;
     }
 
-    const newId = Date.now().toString();
+    const newId = crypto.randomUUID();
     const newMatch: Match = {
       id: newId,
       date: new Date().toISOString(),
@@ -136,9 +188,8 @@ const App: React.FC = () => {
       notes: ""
     };
     
-    const updated = [newMatch, ...matches];
-    setMatches(updated);
-    saveMatches(updated);
+    replaceMatches([newMatch, ...matchesRef.current]);
+    if (sessionUser) queueWrite(`match:${newMatch.id}`, () => upsertMatch(sessionUser.id, newMatch));
 
     setActiveMatchConfig(config);
     setActiveMatchId(newId);
@@ -157,14 +208,15 @@ const App: React.FC = () => {
 
     const finalScore = getFinalScoreString(points, activeMatchConfig);
 
-    const updatedMatches = matches.map(m => 
+    const updatedMatches = matchesRef.current.map(m => 
       m.id === activeMatchId 
         ? { ...m, points, isCompleted: true, finalScore } 
         : m
     );
 
-    setMatches(updatedMatches);
-    saveMatches(updatedMatches);
+    replaceMatches(updatedMatches);
+    const updatedMatch = updatedMatches.find(m => m.id === activeMatchId);
+    if (updatedMatch && sessionUser) queueWrite(`match:${updatedMatch.id}`, () => upsertMatch(sessionUser.id, updatedMatch));
 
     setActiveMatchConfig(null);
     setActiveMatchId(null);
@@ -178,14 +230,15 @@ const App: React.FC = () => {
 
     const currentScore = getFinalScoreString(points, config);
 
-    const updatedMatches = matches.map(m => 
+    const updatedMatches = matchesRef.current.map(m => 
       m.id === id 
         ? { ...m, points, finalScore: currentScore } 
         : m
     );
 
-    setMatches(updatedMatches);
-    saveMatches(updatedMatches);
+    replaceMatches(updatedMatches);
+    const updatedMatch = updatedMatches.find(m => m.id === id);
+    if (updatedMatch && sessionUser) queueWrite(`match:${updatedMatch.id}`, () => upsertMatch(sessionUser.id, updatedMatch));
 
     // If we're coming from viewing/editing a completed match, update that state too
     if (viewingMatch && viewingMatch.id === id) {
@@ -201,14 +254,15 @@ const App: React.FC = () => {
     const currentScore = getFinalScoreString(points, config);
     const details = getScoreDetails(points, config);
 
-    const updatedMatches = matches.map(m => 
+    const updatedMatches = matchesRef.current.map(m => 
       m.id === id 
         ? { ...m, points, finalScore: currentScore, isCompleted: details.isMatchOver } 
         : m
     );
 
-    setMatches(updatedMatches);
-    saveMatches(updatedMatches);
+    replaceMatches(updatedMatches);
+    const updatedMatch = updatedMatches.find(m => m.id === id);
+    if (updatedMatch && sessionUser) queueWrite(`match:${updatedMatch.id}`, () => upsertMatch(sessionUser.id, updatedMatch));
 
     if (viewingMatch && viewingMatch.id === id) {
        setViewingMatch(updatedMatches.find(m => m.id === id)!);
@@ -219,12 +273,13 @@ const App: React.FC = () => {
     const id = activeMatchId || viewingMatch?.id;
     if (!id) return;
 
-    const updatedMatches = matches.map(m => 
+    const updatedMatches = matchesRef.current.map(m => 
       m.id === id ? { ...m, notes } : m
     );
 
-    setMatches(updatedMatches);
-    saveMatches(updatedMatches);
+    replaceMatches(updatedMatches);
+    const updatedMatch = updatedMatches.find(m => m.id === id);
+    if (updatedMatch && sessionUser) queueWrite(`match:${updatedMatch.id}`, () => upsertMatch(sessionUser.id, updatedMatch));
 
     if (viewingMatch && viewingMatch.id === id) {
       setViewingMatch(prev => prev ? { ...prev, notes } : null);
@@ -238,13 +293,18 @@ const App: React.FC = () => {
     } else {
       const newPlayer: Player = {
         ...playerData,
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
       };
       updated = [...players, newPlayer];
     }
     setPlayers(updated);
-    // Only persist players marked with isSaved: true
-    savePlayers(updated.filter(p => p.isSaved));
+    const savedPlayer = editingPlayer
+      ? updated.find(p => p.id === editingPlayer.id)
+      : updated[updated.length - 1];
+    if (savedPlayer && sessionUser) {
+      if (savedPlayer.isSaved) queueWrite(`player:${savedPlayer.id}`, () => upsertPlayer(sessionUser.id, savedPlayer));
+      else if (editingPlayer?.isSaved) queueWrite(`player:${savedPlayer.id}`, () => removePlayer(sessionUser.id, savedPlayer.id));
+    }
     setIsAddingPlayer(false);
     setEditingPlayer(null);
   };
@@ -252,13 +312,12 @@ const App: React.FC = () => {
   const handleDeletePlayer = (id: string) => {
     const updated = players.filter(p => p.id !== id);
     setPlayers(updated);
-    savePlayers(updated.filter(p => p.isSaved));
+    if (sessionUser) queueWrite(`player:${id}`, () => removePlayer(sessionUser.id, id));
   };
 
   const handleDeleteMatch = (id: string) => {
-    const updated = matches.filter(m => m.id !== id);
-    setMatches(updated);
-    saveMatches(updated);
+    replaceMatches(matchesRef.current.filter(m => m.id !== id));
+    if (sessionUser) queueWrite(`match:${id}`, () => removeMatch(sessionUser.id, id));
     if (activeMatchId === id) {
       setActiveMatchId(null);
       setActiveMatchConfig(null);
@@ -271,31 +330,87 @@ const App: React.FC = () => {
     setIsSettingUp(true);
   };
 
-  if (isAuthChecking) {
+  const importBackup = async (backup: { players: Player[]; matches: Match[] }) => {
+    if (!sessionUser) return;
+    if (operations.current.length) throw new Error('Wait for current changes to save before importing.');
+    const existingPlayers = new Set(players.map(player => player.id));
+    const existingMatches = new Set(matchesRef.current.map(match => match.id));
+    const newPlayers = backup.players.filter(player => !existingPlayers.has(player.id));
+    const newMatches = backup.matches.filter(match => !existingMatches.has(match.id));
+    if (!newPlayers.length && !newMatches.length) {
+      setLocalBackup(null);
+      return;
+    }
+    if (!window.confirm(`Import ${newPlayers.length} player(s) and ${newMatches.length} match(es) into this account?`)) return;
+    setImporting(true);
+    try {
+      for (const player of newPlayers) await upsertPlayer(sessionUser.id, player);
+      for (const match of newMatches) await upsertMatch(sessionUser.id, match);
+      const workspace = await loadWorkspace(sessionUser.id);
+      setPlayers(workspace.players);
+      replaceMatches(workspace.matches);
+      setLocalBackup(null);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const signOut = async () => {
+    if (operations.current.length || importing) {
+      window.alert('Some changes have not reached the database. Retry saving before signing out.');
+      return;
+    }
+    if (window.confirm('Sign out of NTP Analytics?')) await supabase?.auth.signOut();
+  };
+
+  const syncBanner = (pendingWrites || syncError) ? (
+    <div role={syncError ? 'alert' : 'status'} className={`fixed top-2 left-2 right-2 max-w-md mx-auto z-[100] rounded-xl px-4 py-3 text-sm shadow-lg ${syncError ? 'bg-red-700 text-white' : 'bg-[#1C1C1E] text-white'}`}>
+      {syncError ? `Changes not saved: ${syncError}` : `Saving ${pendingWrites} change${pendingWrites === 1 ? '' : 's'}…`}
+      {syncError && <button className="ml-3 underline font-bold" onClick={() => void flushWrites()}>Retry</button>}
+    </div>
+  ) : null;
+
+  if (!supabase) {
+    return <div className="min-h-screen bg-iosBg p-8 flex items-center justify-center text-center">
+      <div><h1 className="text-xl font-bold mb-3">NTP Analytics is not configured</h1>
+      <p>Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in the deployment environment.</p></div>
+    </div>;
+  }
+
+  if (access === 'checking') {
     return (
       <div className="min-h-screen bg-[#F2F2F7] flex flex-col items-center justify-center p-4">
         <div className="w-16 h-16 bg-white rounded-2xl shadow-md flex items-center justify-center mb-4">
           <i className="fa-solid fa-spinner animate-spin text-[#0F5CCE] text-2xl"></i>
         </div>
-        <p className="text-[#8E8E93] text-sm font-semibold">Verifying session...</p>
+        <p className="text-[#8E8E93] text-sm font-semibold">{ssoBusy ? 'Signing you in…' : 'Verifying session...'}</p>
       </div>
     );
   }
 
-  if (!sessionUser) {
+  if (access === 'error') {
+    return <div className="min-h-screen bg-iosBg p-8 flex flex-col items-center justify-center text-center gap-4">
+      <h1 className="text-xl font-bold">Could not load Analytics</h1>
+      <p role="alert" className="text-red-700">{accessError}</p>
+      <button className="px-5 py-3 bg-primary text-white rounded-xl" onClick={() => setRefreshKey(value => value + 1)}>Retry</button>
+      <button className="text-primary underline" onClick={() => void signOut()}>Sign out</button>
+    </div>;
+  }
+
+  if (access === 'signedOut' || !sessionUser) {
     return (
-      <AuthView 
-        onAuthSuccess={(user) => { 
-          setSessionUser(user); 
-          setPlayers(loadPlayers()); 
-          setMatches(loadMatches()); 
-        }} 
+      <>{syncBanner}
+      <AuthView
+        onAuthSuccess={() => setRefreshKey(value => value + 1)}
+        handoffError={handoffError}
       />
+      </>
     );
   }
 
   if (isAddingPlayer || editingPlayer) {
     return (
+      <>{syncBanner}
       <AddPlayerView 
         playerToEdit={editingPlayer || undefined}
         onSave={handleSavePlayer} 
@@ -304,6 +419,7 @@ const App: React.FC = () => {
           setEditingPlayer(null);
         }} 
       />
+      </>
     );
   }
 
@@ -311,6 +427,7 @@ const App: React.FC = () => {
   if (isSettingUp || editingSettingsMatch) {
     const editConfig = editingSettingsMatch ? { ...editingSettingsMatch.config, existingMatchId: editingSettingsMatch.id } : undefined;
     return (
+      <>{syncBanner}
       <SetupView 
         players={players} 
         onStartMatch={handleStartMatch} 
@@ -318,11 +435,13 @@ const App: React.FC = () => {
         onAddNewPlayer={() => setIsAddingPlayer(true)}
         initialConfig={editConfig}
       />
+      </>
     );
   }
 
   if (viewingMatch) {
     return (
+      <>{syncBanner}
       <ActiveMatchView 
         config={viewingMatch.config} 
         players={players} 
@@ -335,12 +454,14 @@ const App: React.FC = () => {
         onEditSettings={() => setEditingSettingsMatch(viewingMatch)}
         isReadOnly={false}
       />
+      </>
     );
   }
 
   if (activeTab === Tab.Active && activeMatchConfig) {
     const currentMatch = matches.find(m => m.id === activeMatchId);
     return (
+      <>{syncBanner}
       <ActiveMatchView 
         config={activeMatchConfig} 
         players={players} 
@@ -353,11 +474,14 @@ const App: React.FC = () => {
         onEditSettings={() => setEditingSettingsMatch(currentMatch || null)}
         onCancel={() => { setActiveMatchConfig(null); setActiveTab(Tab.Matches); }} 
       />
+      </>
     );
   }
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} onSignOut={signOut}>
+      {syncBanner}
+      {activeTab === Tab.Matches && <ImportPanel localBackup={localBackup} importing={importing} onImport={importBackup} />}
       {activeTab === Tab.Matches && (
         <MatchesView 
           matches={matches} 

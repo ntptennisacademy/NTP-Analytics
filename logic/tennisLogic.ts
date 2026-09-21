@@ -1,4 +1,4 @@
-import { Point, MatchConfig, Outcome, ShotKind } from '../types';
+import { Point, MatchConfig, Outcome, ShotKind, ShotLocation, ErrorType } from '../types';
 
 export const POINT_VALUES = ['0', '15', '30', '40', 'Ad'];
 

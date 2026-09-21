@@ -50,7 +50,7 @@ const MatchListItem: React.FC<{
         dragConstraints={{ left: -100, right: 0 }}
         dragElastic={0.1}
         animate={{ x: isOpen ? -100 : 0 }}
-        onDragEnd={(_, info) => {
+        onDragEnd={(_event: unknown, info: { offset: { x: number } }) => {
           if (info.offset.x < -40) {
             setIsOpen(true);
           } else {

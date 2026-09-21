@@ -209,8 +209,8 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
   };
 
   const generateReportHTML = (playerId: string) => {
-    const subjectPlayer = players.find(p => p.id === playerId)!;
-    const opponentPlayer = players.find(p => p.id === (playerId === p1.id ? p2.id : p1.id))!;
+    const subjectPlayer = playerId === p1.id ? p1 : p2;
+    const opponentPlayer = playerId === p1.id ? p2 : p1;
     const subjectStats = playerId === p1.id ? stats.p1 : stats.p2;
     const finalScoreStr = getFinalScoreString(points, config);
 
@@ -222,6 +222,9 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
     const unforcedSub = filterSubject(getBreakdown('Unforced Error'));
 
     const renderDetailed = (s: DetailedStat) => `${s.won}/${s.total} (${s.pct.toFixed(1)}%)`;
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[character]!));
 
     const logoSVG = `
       <svg width="340" height="60" viewBox="0 0 500 80" xmlns="http://www.w3.org/2000/svg">
@@ -276,10 +279,10 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
         </div>
         
         <table class="meta-info">
-          <tr><td>NAME: <span>${subjectPlayer.name}</span></td></tr>
-          <tr><td>OPPONENT: <span>${opponentPlayer.name}</span></td></tr>
-          <tr><td>ROUND #: <span>${exportRound || 'N/A'}</span></td></tr>
-          <tr><td>SCORE: <span>${finalScoreStr}</span></td></tr>
+          <tr><td>NAME: <span>${escapeHtml(subjectPlayer.name)}</span></td></tr>
+          <tr><td>OPPONENT: <span>${escapeHtml(opponentPlayer.name)}</span></td></tr>
+          <tr><td>ROUND #: <span>${escapeHtml(exportRound || 'N/A')}</span></td></tr>
+          <tr><td>SCORE: <span>${escapeHtml(finalScoreStr)}</span></td></tr>
         </table>
 
         <div class="section-title">Match Statistics</div>
@@ -391,7 +394,7 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
 
         <div class="notes-box">
           <div class="notes-title">Match Notes</div>
-          <div style="white-space: pre-wrap; line-height: 1.6;">${notes || 'No specific notes recorded for this match session.'}</div>
+          <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(notes || 'No specific notes recorded for this match session.')}</div>
         </div>
       </body>
       </html>
@@ -401,7 +404,7 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
   const exportMatch = (format: 'pdf' | 'doc') => {
     if (!selectedPlayerId) return;
     const html = generateReportHTML(selectedPlayerId);
-    const subjectPlayer = players.find(p => p.id === selectedPlayerId)!;
+    const subjectPlayer = selectedPlayerId === p1.id ? p1 : p2;
 
     if (format === 'pdf') {
       const printWindow = window.open('', '_blank');
@@ -415,7 +418,7 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${subjectPlayer.name}_NTP_Analysis_${new Date().getTime()}.doc`;
+      link.download = `${subjectPlayer.name.replace(/[\\/:*?"<>|]/g, '_')}_NTP_Analysis_${new Date().getTime()}.doc`;
       link.click();
       URL.revokeObjectURL(url);
     }

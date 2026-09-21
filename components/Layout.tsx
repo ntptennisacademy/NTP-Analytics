@@ -1,12 +1,12 @@
 
 import React from 'react';
 import { Tab } from '../types';
-import { supabase } from '../supabaseClient';
 
 interface LayoutProps {
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
   children: React.ReactNode;
+  onSignOut: () => void;
 }
 
 const RacketIcon = ({ active }: { active: boolean }) => (
@@ -16,14 +16,7 @@ const RacketIcon = ({ active }: { active: boolean }) => (
   </svg>
 );
 
-const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children }) => {
-  const handleLogout = async () => {
-    const confirmLogout = window.confirm("Are you sure you want to sign out?");
-    if (confirmLogout) {
-      await supabase.auth.signOut();
-    }
-  };
-
+const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, onSignOut, children }) => {
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-iosBg overflow-hidden">
       <main className="flex-1 overflow-y-auto pb-20">
@@ -48,7 +41,7 @@ const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children }) =>
           <span className={`text-[10px] font-black uppercase tracking-widest ${activeTab === Tab.Players ? 'opacity-100' : 'opacity-60'}`}>Players</span>
         </button>
         <button
-          onClick={handleLogout}
+          onClick={onSignOut}
           className="flex flex-col items-center gap-1.5 w-full text-iosGray hover:text-[#FF3B30] active:scale-95 transition-all duration-200"
         >
           <i className="fa-solid fa-right-from-bracket text-xl opacity-60"></i>
