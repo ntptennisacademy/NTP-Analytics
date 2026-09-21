@@ -1,7 +1,6 @@
 import React from 'react';
 import Layout from './components/Layout';
 import { Tab, Player, Match, MatchConfig, Point } from './types';
-import { readLegacyData } from './store';
 import MatchesView from './views/MatchesView';
 import PlayersView from './views/PlayersView';
 import SetupView from './views/SetupView';
@@ -12,7 +11,6 @@ import { supabase } from './supabaseClient';
 import { AuthView } from './views/AuthView';
 import { loadWorkspace, upsertPlayer, removePlayer, upsertMatch, removeMatch } from './repository';
 import type { User } from '@supabase/supabase-js';
-import { ImportPanel } from './components/ImportPanel';
 import { consumeSsoHandoff, hasSsoHandoff } from './ssoHandoff';
 import { arrivedForPasswordReset } from './passwordReset';
 import { ResetPasswordView } from './views/ResetPasswordView';
@@ -43,8 +41,6 @@ const App: React.FC = () => {
   const [recovering, setRecovering] = React.useState(arrivedForPasswordReset);
   const [syncError, setSyncError] = React.useState('');
   const [pendingWrites, setPendingWrites] = React.useState(0);
-  const [importing, setImporting] = React.useState(false);
-  const [localBackup, setLocalBackup] = React.useState<{ players: Player[]; matches: Match[] } | null>(null);
   const operations = React.useRef<Array<{ key: string; run: () => Promise<void> }>>([]);
   const flushing = React.useRef(false);
 
@@ -86,11 +82,6 @@ const App: React.FC = () => {
         setPlayers(workspace.players);
         matchesRef.current = workspace.matches;
         setMatches(workspace.matches);
-        const legacy = readLegacyData();
-        const playerIds = new Set(workspace.players.map(player => player.id));
-        const matchIds = new Set(workspace.matches.map(match => match.id));
-        setLocalBackup(legacy && (legacy.players.some(player => !playerIds.has(player.id)) ||
-          legacy.matches.some(match => !matchIds.has(match.id))) ? legacy : null);
         setAccess('ready');
       } catch (error) {
         if (active) {
@@ -337,33 +328,8 @@ const App: React.FC = () => {
     setIsSettingUp(true);
   };
 
-  const importBackup = async (backup: { players: Player[]; matches: Match[] }) => {
-    if (!sessionUser) return;
-    if (operations.current.length) throw new Error('Wait for current changes to save before importing.');
-    const existingPlayers = new Set(players.map(player => player.id));
-    const existingMatches = new Set(matchesRef.current.map(match => match.id));
-    const newPlayers = backup.players.filter(player => !existingPlayers.has(player.id));
-    const newMatches = backup.matches.filter(match => !existingMatches.has(match.id));
-    if (!newPlayers.length && !newMatches.length) {
-      setLocalBackup(null);
-      return;
-    }
-    if (!window.confirm(`Import ${newPlayers.length} player(s) and ${newMatches.length} match(es) into this account?`)) return;
-    setImporting(true);
-    try {
-      for (const player of newPlayers) await upsertPlayer(sessionUser.id, player);
-      for (const match of newMatches) await upsertMatch(sessionUser.id, match);
-      const workspace = await loadWorkspace(sessionUser.id);
-      setPlayers(workspace.players);
-      replaceMatches(workspace.matches);
-      setLocalBackup(null);
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const signOut = async () => {
-    if (operations.current.length || importing) {
+    if (operations.current.length) {
       window.alert('Some changes have not reached the database. Retry saving before signing out.');
       return;
     }
@@ -496,7 +462,6 @@ const App: React.FC = () => {
   return (
     <Layout activeTab={activeTab} setActiveTab={setActiveTab} onSignOut={signOut}>
       {syncBanner}
-      {activeTab === Tab.Matches && <ImportPanel localBackup={localBackup} importing={importing} onImport={importBackup} />}
       {activeTab === Tab.Matches && (
         <MatchesView 
           matches={matches} 
