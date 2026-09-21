@@ -14,6 +14,8 @@ import { loadWorkspace, upsertPlayer, removePlayer, upsertMatch, removeMatch } f
 import type { User } from '@supabase/supabase-js';
 import { ImportPanel } from './components/ImportPanel';
 import { consumeSsoHandoff, hasSsoHandoff } from './ssoHandoff';
+import { arrivedForPasswordReset } from './passwordReset';
+import { ResetPasswordView } from './views/ResetPasswordView';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<Tab>(Tab.Matches);
@@ -36,6 +38,9 @@ const App: React.FC = () => {
   // code we redeem before deciding whether anyone is signed in.
   const [ssoBusy, setSsoBusy] = React.useState(hasSsoHandoff);
   const [handoffError, setHandoffError] = React.useState('');
+  // A recovery link signs the user in as it lands, so without this they would
+  // sail past the reset form straight into the app and never set a password.
+  const [recovering, setRecovering] = React.useState(arrivedForPasswordReset);
   const [syncError, setSyncError] = React.useState('');
   const [pendingWrites, setPendingWrites] = React.useState(0);
   const [importing, setImporting] = React.useState(false);
@@ -96,6 +101,8 @@ const App: React.FC = () => {
     };
     void check();
     const { data: { subscription } } = db.auth.onAuthStateChange(event => {
+      // Second signal, in case the fragment was consumed before we read it.
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
       if (event === 'SIGNED_OUT') {
         // Keep Supabase calls outside the auth callback.
         window.setTimeout(() => setRefreshKey(value => value + 1), 0);
@@ -375,6 +382,14 @@ const App: React.FC = () => {
       <div><h1 className="text-xl font-bold mb-3">NTP Analytics is not configured</h1>
       <p>Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in the deployment environment.</p></div>
     </div>;
+  }
+
+  if (recovering) {
+    return (
+      <ResetPasswordView
+        onDone={() => { setRecovering(false); setRefreshKey(value => value + 1); }}
+      />
+    );
   }
 
   if (access === 'checking') {

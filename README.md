@@ -44,6 +44,28 @@ this app's deployed URL. When a hand-off fails — an expired code, a role the
 superapp will not hand over — the coach lands on the sign-in form with the
 reason shown rather than at a dead end.
 
+### Forgotten passwords
+
+An account created by the hand-off has a random password that nobody — not the
+coach, not the academy — ever sees, because they were never meant to type one.
+So **Forgot password?** on the sign-in form is the only route in for a coach who
+opens Analytics directly rather than through the superapp tile, and the sign-up
+form points them at it when it detects an existing account.
+
+The link emailed by Supabase returns to the site with a `type=recovery`
+fragment. `passwordReset.ts` reads that marker **at module load**, because
+supabase-js consumes the fragment during start-up — and signs the user in while
+doing so, which would otherwise carry them straight past the form into the app.
+`App.tsx` also listens for the `PASSWORD_RECOVERY` event as a second signal.
+
+Two project settings this depends on, both shared with Tactical Drillboard:
+
+- every deployed origin must be in the Auth **redirect allowlist**, or the
+  emailed link lands at the site root with no token;
+- a real **SMTP provider** must be configured. Supabase's built-in sender is
+  rate limited to a handful of messages an hour and on many projects only
+  delivers to the project team's own addresses.
+
 When Supabase identifies an existing email during signup, Analytics directs the
 user to sign in. Supabase can deliberately obscure whether an email is already
 registered, so some cases instead receive a generic email-confirmation message

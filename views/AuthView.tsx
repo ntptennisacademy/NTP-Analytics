@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { supabase } from '../supabaseClient';
+import { sendResetEmail } from '../passwordReset';
 
 interface AuthViewProps {
   onAuthSuccess: () => void;
@@ -9,7 +10,7 @@ interface AuthViewProps {
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError }) => {
-  const [mode, setMode] = React.useState<'signIn' | 'signUp'>('signIn');
+  const [mode, setMode] = React.useState<'signIn' | 'signUp' | 'forgot'>('signIn');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
@@ -23,7 +24,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
     if (handoffError) setError(handoffError);
   }, [handoffError]);
 
-  const changeMode = (next: 'signIn' | 'signUp') => {
+  const changeMode = (next: 'signIn' | 'signUp' | 'forgot') => {
     setMode(next);
     setPassword('');
     setConfirmPassword('');
@@ -36,7 +37,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
     setPassword('');
     setConfirmPassword('');
     setNotice('');
-    setError('You already have an account. Please sign in instead.');
+    setError('You already have an account. Sign in below, or use "Forgot password?" to set one — coaches who opened Analytics from the NTP Superapp have never chosen a password.');
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -54,6 +55,21 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
         setError('Use at least 8 characters for your password.');
         return;
       }
+    }
+
+    if (mode === 'forgot') {
+      setLoading(true);
+      try {
+        await sendResetEmail(supabase, email);
+        // Always the same message: whether an address is registered is not
+        // something an unauthenticated visitor should be able to probe.
+        setNotice('If that email has an account, a reset link is on its way. Check your inbox and spam folder.');
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not send the reset email.');
+      } finally {
+        setLoading(false);
+      }
+      return;
     }
 
     setLoading(true);
@@ -111,8 +127,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
         </div>
         <div className="p-8">
           <div className="flex border-b border-[#C6C6C8]/30 mb-6" role="tablist" aria-label="Account access">
-            <button type="button" role="tab" aria-selected={mode === 'signIn'} onClick={() => changeMode('signIn')}
-              className={`flex-1 pb-3 font-bold text-sm ${mode === 'signIn' ? 'text-[#0F5CCE] border-b-[3px] border-[#0F5CCE]' : 'text-[#8E8E93]'}`}>
+            <button type="button" role="tab" aria-selected={mode !== 'signUp'} onClick={() => changeMode('signIn')}
+              className={`flex-1 pb-3 font-bold text-sm ${mode !== 'signUp' ? 'text-[#0F5CCE] border-b-[3px] border-[#0F5CCE]' : 'text-[#8E8E93]'}`}>
               Sign in
             </button>
             <button type="button" role="tab" aria-selected={mode === 'signUp'} onClick={() => changeMode('signUp')}
@@ -121,9 +137,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
             </button>
           </div>
           <p className="text-xs text-[#8E8E93] leading-relaxed mb-5">
-            {mode === 'signIn'
-              ? 'Use your Tactical Drillboard account, or an account created here.'
-              : 'This creates an account in the shared Tactical Drillboard project.'}
+            {mode === 'forgot'
+              ? 'Enter your email and we will send you a link to set a new password.'
+              : mode === 'signIn'
+                ? 'Use your Tactical Drillboard account, or an account created here.'
+                : 'This creates an account in the shared Tactical Drillboard project.'}
           </p>
           {error && <p role="alert" className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl text-sm mb-5">{error}</p>}
           {notice && <p role="status" className="bg-blue-50 border border-blue-200 text-blue-900 p-4 rounded-2xl text-sm mb-5">{notice}</p>}
@@ -134,12 +152,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
                 onChange={event => setEmail(event.target.value)} disabled={loading}
                 className="block mt-2 w-full px-4 py-3.5 bg-[#F2F2F7] rounded-2xl text-[#1C1C1E] text-base outline-none focus:ring-2 focus:ring-[#0F5CCE]" />
             </label>
-            <label className="block text-xs font-bold text-[#8E8E93] uppercase tracking-wider">
+            {mode !== 'forgot' && <label className="block text-xs font-bold text-[#8E8E93] uppercase tracking-wider">
               Password
               <input type="password" autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'} required value={password}
                 onChange={event => setPassword(event.target.value)} disabled={loading}
                 className="block mt-2 w-full px-4 py-3.5 bg-[#F2F2F7] rounded-2xl text-[#1C1C1E] text-base outline-none focus:ring-2 focus:ring-[#0F5CCE]" />
-            </label>
+            </label>}
             {mode === 'signUp' && <label className="block text-xs font-bold text-[#8E8E93] uppercase tracking-wider">
               Confirm password
               <input type="password" autoComplete="new-password" required value={confirmPassword}
@@ -148,9 +166,23 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, handoffError 
             </label>}
             <button type="submit" disabled={loading}
               className="w-full py-4 bg-[#0F5CCE] text-white font-bold rounded-2xl disabled:opacity-50">
-              {loading ? 'Please wait…' : mode === 'signIn' ? 'Sign in' : 'Create account'}
+              {loading
+                ? 'Please wait…'
+                : mode === 'forgot' ? 'Send reset link'
+                : mode === 'signIn' ? 'Sign in'
+                : 'Create account'}
             </button>
           </form>
+          {mode === 'signIn' && <p className="text-center text-xs text-[#8E8E93] mt-5">
+            <button type="button" className="text-[#0F5CCE] font-bold underline" onClick={() => changeMode('forgot')}>
+              Forgot password?
+            </button>
+          </p>}
+          {mode === 'forgot' && <p className="text-center text-xs text-[#8E8E93] mt-5">
+            <button type="button" className="text-[#0F5CCE] font-bold underline" onClick={() => changeMode('signIn')}>
+              Back to sign in
+            </button>
+          </p>}
           {mode === 'signUp' && <p className="text-center text-xs text-[#8E8E93] mt-5">
             Already have an account?{' '}
             <button type="button" className="text-[#0F5CCE] font-bold underline" onClick={() => changeMode('signIn')}>Sign in instead</button>
