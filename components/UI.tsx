@@ -1,4 +1,5 @@
 import React from 'react';
+import analyticsLogo from '../assets/Logo.png';
 
 interface SegmentedControlProps<T> {
   options: { label: string; value: T }[];
@@ -46,22 +47,17 @@ export const Header: React.FC<{ title: string; leftAction?: React.ReactNode; rig
 );
 
 export const NTPMatchTrackLogo: React.FC<{ className?: string; size?: number; variant?: 'long' | 'short' }> = ({ className = "", size = 16, variant = 'short' }) => (
-  <div className={`flex items-center gap-1.5 ${className}`}>
-    {variant === 'short' && (
-      <div className="relative" style={{ width: size * 1.5, height: size * 1.5 }}>
-        <i className="fa-solid fa-tennis-ball text-primary absolute inset-0 flex items-center justify-center" style={{ fontSize: size }}></i>
-        <i className="fa-solid fa-chart-simple text-primary/30 absolute bottom-0 right-0" style={{ fontSize: size * 0.6 }}></i>
-      </div>
-    )}
-    <div 
-      className="text-black font-black uppercase tracking-tighter leading-none whitespace-nowrap"
-      style={{ fontSize: size, fontFamily: 'Arial Black, sans-serif' }}
-    >
-      {variant === 'short' ? (
-        <><span className="text-primary italic">NTP</span> ANALYTICS</>
-      ) : (
-        <span className="text-primary italic">NEXT TENNIS PRO</span>
-      )}
-    </div>
+  <div
+    className={`overflow-hidden ${className}`}
+    style={{
+      width: size * (variant === 'long' ? 7.5 : 6.75),
+      height: size * (variant === 'long' ? 4.2 : 3),
+    }}
+  >
+    <img
+      src={analyticsLogo}
+      alt="NTP Analytics"
+      className="h-full w-full object-cover object-center mix-blend-multiply"
+    />
   </div>
 );

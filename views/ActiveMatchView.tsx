@@ -1,7 +1,8 @@
 import React from 'react';
 import { MatchConfig, Player, Point, Outcome, ShotKind, ShotLocation, ErrorType, ServePlacement, ServeType, CourtSide } from '../types';
 import { Card, SegmentedControl } from '../components/UI';
-import { CurrentScore, calculateNewScore, calculateStats, DetailedStat, calculateShotBreakdown, getPointDescription, isWinningPointOfGame, getFinalScoreString, calculateServePlacementStats, getCourtSide, calculateServeTypeStats, calculateDetailedShotStats } from '../logic/tennisLogic';
+import MatchLog from '../components/MatchLog';
+import { CurrentScore, calculateNewScore, calculateStats, DetailedStat, calculateShotBreakdown, isWinningPointOfGame, getFinalScoreString, calculateServePlacementStats, getCourtSide, calculateServeTypeStats, calculateDetailedShotStats } from '../logic/tennisLogic';
 
 interface ActiveMatchViewProps {
   config: MatchConfig;
@@ -698,15 +699,7 @@ const ActiveMatchView: React.FC<ActiveMatchViewProps> = ({
           )}
 
           {activeSubTab === 'Match Log' && (
-            <div className="bg-white rounded-xl overflow-hidden border border-iosDivider/20 mb-10 shadow-sm">
-              {filteredPoints.slice().reverse().map((p, i) => (
-                <div key={i} className="flex justify-between items-center px-4 py-5 border-b border-iosDivider/10 bg-white">
-                  <div className="w-12 text-primary font-black text-[13px]">{p.scoreAtStart.p1Points}</div>
-                  <div className="flex-1 px-4 text-center text-[12px] font-medium text-black/80">{getPointDescription(p, players)}</div>
-                  <div className="w-12 text-right font-black text-[13px]">{p.scoreAtStart.p2Points}</div>
-                </div>
-              ))}
-            </div>
+            <MatchLog points={filteredPoints} players={players} score={score} />
           )}
         </div>
       </div>
